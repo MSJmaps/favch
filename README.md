@@ -2,6 +2,8 @@
 
 A home page built only from the YouTube channels you choose. No recommendations, no Shorts, no livestreams. Just the new videos from channels you've bookmarked, in the order you keep them.
 
+![FavCH showing the latest videos from a chosen set of channels](screenshot.png)
+
 ## How it works
 
 1. Make a bookmark folder for your favorite channels, with subfolders for groups if you like (for example "History", "Woodworking", "Music").
