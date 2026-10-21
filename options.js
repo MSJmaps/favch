@@ -64,9 +64,14 @@ async function init() {
     }, 500);
   });
 
-  document.getElementById('clearCache').addEventListener('click', async () => {
-    await chrome.storage.local.remove(['channelIds', 'feedCache']);
-    flash('Saved channel data cleared. The next load will look every channel up again.');
+  document.getElementById('clearResults').addEventListener('click', async () => {
+    await chrome.storage.local.remove(['videoCache', 'feedCache']);
+    flash('Saved videos cleared. The next load will check every channel again.');
+  });
+
+  document.getElementById('resetLookups').addEventListener('click', async () => {
+    await chrome.storage.local.remove('channelIds');
+    flash('Channel lookups reset. The next load will be slower than usual.');
   });
 }
 

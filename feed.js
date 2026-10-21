@@ -2,17 +2,21 @@
 
 const YT_NS = 'http://www.youtube.com/xml/schemas/2015';
 const MEDIA_NS = 'http://search.yahoo.com/mrss/';
-const DAY = 24 * 60 * 60 * 1000;
-const FEED_TTL = 15 * 60 * 1000;   // reuse a channel's results for 15 minutes
-const MAX_WINDOW = 14 * DAY;       // longest time frame offered
-const CONCURRENCY = 4;             // channels checked at once
-const KEEP_STALE = 7 * DAY;        // keep last good results this long as a fallback
-const RETRY_STATUSES = [404, 429, 500, 502, 503];
+const MINUTE = 60 * 1000;
+const DAY = 24 * 60 * MINUTE;
+const FEED_TTL = 30 * MINUTE;        // "Load videos" reuses a channel's results this long
+const REFRESH_MIN_AGE = 5 * MINUTE;  // "Refresh" skips channels checked more recently than this
+const KEEP_STALE = 7 * DAY;          // last good results kept this long as a fallback
+const MAX_WINDOW = 14 * DAY;         // longest time frame offered
+const CONCURRENCY = 6;               // channels checked at once when things are healthy
+const PAGE_CONCURRENCY = 2;          // channel pages are heavy, so at most this many at once
+const TRIP_AFTER = 5;                // feed failures in a row before giving up on feeds for this load
 
 const DEFAULT_CHOICES = { folders: null, timeframe: '7', order: 'bookmark' };
 const DEFAULT_SETTINGS = { theme: 'system', folderId: null, mutedWords: [] };
 
 const $ = (sel) => document.querySelector(sel);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let folders = [];
 let settings = { ...DEFAULT_SETTINGS };
 let loading = false;
@@ -40,33 +44,20 @@ async function init() {
 
   $('#loadBtn').addEventListener('click', () => load(false));
   $('#refreshBtn').addEventListener('click', () => load(true));
+  $('#selectAll').addEventListener('change', (e) => {
+    for (const b of folderBoxes()) b.checked = e.target.checked;
+    syncSelectAll();
+  });
 
-  const root = await findRoot();
-  if (!root) {
-    $('#folderList').innerHTML = '';
-    const p = document.createElement('p');
-    p.className = 'folder-note';
-    p.textContent = settings.folderId
-      ? 'The folder you chose no longer exists. Pick another one in Settings.'
-      : 'Choose the bookmark folder that holds your favorite channels.';
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'primary';
-    btn.textContent = 'Choose a folder';
-    btn.addEventListener('click', () => chrome.runtime.openOptionsPage());
-    $('#folderList').append(p, btn);
-    showEmpty('Once you choose a folder, its subfolders will appear on the left.');
-    $('#loadBtn').disabled = true;
-    $('#refreshBtn').disabled = true;
-    return;
+  // Keep the folder list current when bookmarks change while this page is open.
+  for (const ev of ['onCreated', 'onRemoved', 'onChanged', 'onMoved', 'onChildrenReordered']) {
+    chrome.bookmarks[ev].addListener(scheduleFolderRefresh);
   }
 
-  $('#folderName').textContent = root.title;
-  folders = flattenFolders(root);
   const choices = { ...DEFAULT_CHOICES, ...(await getLocal('lastChoices', {})) };
-  renderFolders(choices.folders);
   setRadio('timeframe', choices.timeframe);
   setRadio('order', choices.order);
+  if (!(await refreshFolders(choices.folders))) return;
 
   if (choices.folders && choices.folders.length) load(false);
   else showEmpty('Pick one or more folders, then choose Load videos.');
@@ -106,12 +97,52 @@ function flattenFolders(root) {
   return out;
 }
 
-const folderBoxes = () => [...document.querySelectorAll('#folderList input[type="checkbox"]')];
+let folderTimer;
+function scheduleFolderRefresh() {
+  clearTimeout(folderTimer);
+  folderTimer = setTimeout(() => refreshFolders(), 300);
+}
 
-function renderFolders(savedIds) {
+// Re-reads the bookmark tree. Keeps the current ticks unless given a list to restore.
+async function refreshFolders(checkedIds) {
+  const keep = new Set(checkedIds || folderBoxes().filter((b) => b.checked).map((b) => b.value));
+  const root = await findRoot();
+  if (!root) {
+    showNoFolder();
+    return false;
+  }
+  $('#folderName').textContent = root.title;
+  folders = flattenFolders(root);
+  renderFolders(keep);
+  if (!loading) setBusy(false);
+  return true;
+}
+
+function showNoFolder() {
   const list = $('#folderList');
   list.textContent = '';
-  const saved = new Set(savedIds || []);
+  const p = document.createElement('p');
+  p.className = 'folder-note';
+  p.textContent = settings.folderId
+    ? 'The folder you chose no longer exists. Pick another one in Settings.'
+    : 'Choose the bookmark folder that holds your favorite channels.';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'primary';
+  btn.textContent = 'Choose a folder';
+  btn.addEventListener('click', () => chrome.runtime.openOptionsPage());
+  list.append(p, btn);
+  $('#loadBtn').disabled = true;
+  $('#refreshBtn').disabled = true;
+  showEmpty('Once you choose a folder, its subfolders will appear on the left.');
+}
+
+const folderBoxes = () => [...document.querySelectorAll('#folderList input[type="checkbox"]')];
+
+function renderFolders(checked) {
+  const list = $('#folderList');
+  const scroll = list.scrollTop;
+  list.textContent = '';
   for (const f of folders) {
     const label = document.createElement('label');
     label.className = 'check';
@@ -119,7 +150,7 @@ function renderFolders(savedIds) {
     const box = document.createElement('input');
     box.type = 'checkbox';
     box.value = f.id;
-    box.checked = saved.has(f.id);
+    box.checked = checked.has(f.id);
     box.addEventListener('change', syncSelectAll);
     const name = document.createElement('span');
     name.className = 'name';
@@ -131,10 +162,7 @@ function renderFolders(savedIds) {
     label.append(box, name, count);
     list.append(label);
   }
-  $('#selectAll').addEventListener('change', (e) => {
-    for (const b of folderBoxes()) b.checked = e.target.checked;
-    syncSelectAll();
-  });
+  list.scrollTop = scroll;
   syncSelectAll();
 }
 
@@ -177,14 +205,13 @@ function channelRef(bookmark) {
   return { key: first.toLowerCase(), kind: 'page', page: `https://www.youtube.com/${first}` };
 }
 
-async function resolveId(ref, cache) {
+async function resolveId(ref, cache, ctx) {
   if (ref.kind === 'id') return ref.id;
   if (cache[ref.key]) return cache[ref.key];
 
-  const res = await fetch(ref.page, { credentials: 'omit' });
-  if (res.url.includes('consent.')) throw new Error('YouTube showed a cookie-consent page instead of the channel');
-  if (!res.ok) throw new Error(res.status === 404 ? 'Channel not found (it may have been renamed or deleted)' : `YouTube returned error ${res.status}`);
-  const html = await res.text();
+  const { text: html, url } = await ctx.pageLimit(() => fetchText(ref.page, { retries: 0 }))
+    .catch((err) => { noteFailure(ctx, err); throw err; });
+  if (url.includes('consent.')) throw new Error('YouTube showed a cookie-consent page instead of the channel');
 
   const patterns = ref.kind === 'video'
     ? [/itemprop="channelId" content="(UC[\w-]{22})"/, /"channelId":"(UC[\w-]{22})"/]
@@ -201,27 +228,49 @@ async function resolveId(ref, cache) {
   throw new Error('Could not find the channel ID on its page');
 }
 
-/* ---------- fetching videos ---------- */
+/* ---------- talking to YouTube ---------- */
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-// YouTube's feed server has bouts of spurious 404/500 errors, so retry a couple of times.
-async function fetchText(url) {
+// Retries once, and only for errors that are usually momentary.
+async function fetchText(url, { retries = 1 } = {}) {
   let last;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt) await sleep(attempt === 1 ? 800 : 2500);
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt) await sleep(1000 + Math.random() * 500);
+    let r;
     try {
-      const r = await fetch(url, { credentials: 'omit' });
-      if (r.ok) return r.text();
-      last = new Error(`YouTube returned error ${r.status}`);
-      last.status = r.status;
-      if (!RETRY_STATUSES.includes(r.status)) break;
-    } catch (e) {
-      last = e;
+      r = await fetch(url, { credentials: 'omit' });
+    } catch {
+      last = new Error('Could not reach YouTube');
+      continue;
     }
+    if (r.ok) return { text: await r.text(), url: r.url };
+    last = new Error(r.status === 404 ? 'Not found on YouTube (404)' : `YouTube returned error ${r.status}`);
+    last.status = r.status;
+    if (![500, 502, 503].includes(r.status)) break;
   }
   throw last;
 }
+
+function makeLimiter(n) {
+  let active = 0;
+  const waiting = [];
+  return async (fn) => {
+    while (active >= n) await new Promise((r) => waiting.push(r));
+    active++;
+    try {
+      return await fn();
+    } finally {
+      active--;
+      waiting.shift()?.();
+    }
+  };
+}
+
+function noteFailure(ctx, err) {
+  ctx.troubled = true;
+  if (err && err.status === 429) ctx.tripped = true;
+}
+
+/* Source 1: the channel's "regular videos only" feed (no Shorts, no livestreams). */
 
 function parseFeed(xml) {
   const doc = new DOMParser().parseFromString(xml, 'application/xml');
@@ -240,55 +289,147 @@ function parseFeed(xml) {
   return { channelName, videos };
 }
 
-// A real Short loads at /shorts/ID; anything else gets redirected to /watch.
-async function isShort(id) {
-  try {
-    const r = await fetch(`https://www.youtube.com/shorts/${id}`, { method: 'HEAD', redirect: 'manual', credentials: 'omit' });
-    return r.status === 200;
-  } catch {
-    return false;
-  }
-}
-
-async function fetchFeed(channelId) {
+async function fromFeed(channelId) {
+  const { text } = await fetchText(`https://www.youtube.com/feeds/videos.xml?playlist_id=UULF${channelId.slice(2)}`);
+  const parsed = parseFeed(text);
   const cutoff = Date.now() - MAX_WINDOW;
+  return { ts: Date.now(), source: 'feed', channelName: parsed.channelName, videos: parsed.videos.filter((v) => v.published >= cutoff) };
+}
+
+/* Source 2 (backup): the channel's Videos tab, which also leaves out Shorts and streams. */
+
+const UNIT_MS = { second: 1000, minute: MINUTE, hour: 60 * MINUTE, day: DAY, week: 7 * DAY, month: 30 * DAY, year: 365 * DAY };
+
+function parseAgo(text, now) {
+  const m = /(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago/i.exec(text || '');
+  if (!m) return null;
+  return now - Number(m[1]) * UNIT_MS[m[2].toLowerCase()] + MINUTE;
+}
+
+function parseViews(text) {
+  if (!text) return null;
+  if (/no views/i.test(text)) return 0;
+  const m = /([\d.,]+)\s*([KMB])?/i.exec(text);
+  if (!m) return null;
+  const n = parseFloat(m[1].replace(/,/g, ''));
+  const mult = { k: 1e3, m: 1e6, b: 1e9 }[(m[2] || '').toLowerCase()] || 1;
+  return Math.round(n * mult);
+}
+
+function extractInitialData(html) {
+  const m = /ytInitialData"?\]?\s*=\s*\{/.exec(html);
+  if (!m) return null;
+  const start = m.index + m[0].length - 1;
+  const end = html.indexOf(';</script>', start);
+  if (end < 0) return null;
   try {
-    // "UULF" playlist = the channel's regular videos only: no Shorts, no livestreams.
-    const parsed = parseFeed(await fetchText(
-      `https://www.youtube.com/feeds/videos.xml?playlist_id=UULF${channelId.slice(2)}`));
-    return { ts: Date.now(), filtered: true, channelName: parsed.channelName, videos: parsed.videos.filter((v) => v.published >= cutoff) };
+    return JSON.parse(html.slice(start, end));
   } catch {
-    // Backup: full channel feed, checking each recent video for Shorts.
-    const parsed = parseFeed(await fetchText(`https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`));
-    const kept = [];
-    for (const v of parsed.videos) {
-      if (v.published < cutoff || /#shorts?/i.test(v.title)) continue;
-      if (!(await isShort(v.id))) kept.push(v);
+    return null;
+  }
+}
+
+const runsText = (t) => t?.simpleText || (t?.runs || []).map((r) => r.text).join('') || '';
+
+const VIDEO_ID = /^[\w-]{11}$/;
+const AGO_RE = /(?:Streamed |Premiered )?\d+\s+(?:second|minute|hour|day|week|month|year)s?\s+ago/i;
+const VIEWS_RE = /(?:[\d.,]+\s*[KMB]?|No) views?\b/i;
+
+// Finds video entries in the page data, in page order. Rather than relying on one exact
+// layout (YouTube changes it), it looks for any entry carrying a video ID plus a title,
+// and reads the "3 days ago" and "12K views" text from anywhere inside that entry.
+function collectVideos(data) {
+  const out = [];
+  const seen = new Set();
+  const queue = [data];
+  for (let i = 0; i < queue.length; i++) {
+    const node = queue[i];
+    if (!node || typeof node !== 'object') continue;
+    let id = null;
+    if (typeof node.videoId === 'string' && VIDEO_ID.test(node.videoId) && node.title) id = node.videoId;
+    else if (typeof node.contentId === 'string' && VIDEO_ID.test(node.contentId) && node.metadata) id = node.contentId;
+    if (id) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        const json = JSON.stringify(node);
+        out.push({
+          id,
+          title: runsText(node.title) || node.title?.content || node.metadata?.lockupMetadataViewModel?.title?.content || '(untitled)',
+          timeText: AGO_RE.exec(json)?.[0] || '',
+          viewsText: VIEWS_RE.exec(json)?.[0] || '',
+          upcoming: !!node.upcomingEventData || /"upcomingEventData"|Scheduled for|Premieres in/i.test(json)
+        });
+      }
+      continue;
     }
-    return { ts: Date.now(), filtered: false, channelName: parsed.channelName, videos: kept };
+    for (const v of Object.values(node)) if (v && typeof v === 'object') queue.push(v);
   }
+  return out;
 }
 
-async function getVideos(channelId, feedCache, force) {
+async function fromVideosPage(channelId) {
+  const { text, url } = await fetchText(`https://www.youtube.com/channel/${channelId}/videos?hl=en`, { retries: 0 });
+  if (url.includes('consent.')) throw new Error('YouTube showed a cookie-consent page instead of the channel');
+  const data = extractInitialData(text);
+  if (!data) throw new Error("Couldn't read the channel's Videos page");
+  const now = Date.now();
+  const cutoff = now - MAX_WINDOW;
+  const items = collectVideos(data);
+  console.info('[FavCH] Videos page', channelId, `${items.length} entries found`, items.slice(0, 2));
+  if (!items.length) throw new Error("Read the channel's Videos page but found no videos on it");
+  if (!items.some((v) => parseAgo(v.timeText, now))) throw new Error("Read the channel's Videos page but couldn't read its upload dates");
+  const videos = items
+    .filter((v) => !v.upcoming && !/^streamed/i.test(v.timeText))
+    .map((v) => ({ id: v.id, title: v.title, published: parseAgo(v.timeText, now), views: parseViews(v.viewsText), approx: true }))
+    .filter((v) => v.published && v.published >= cutoff);
+  return {
+    ts: now,
+    source: 'page',
+    channelName: data.metadata?.channelMetadataRenderer?.title || '',
+    videos
+  };
+}
+
+/* Choosing a source for one channel. */
+
+async function getVideos(channelId, feedCache, ctx) {
   const cached = feedCache[channelId];
-  if (!force && cached && Date.now() - cached.ts < FEED_TTL) return cached;
-  try {
-    const fresh = await fetchFeed(channelId);
-    feedCache[channelId] = fresh;
-    return fresh;
-  } catch (err) {
-    // YouTube's feed is down: fall back to the last good result if there is one.
-    if (cached) return { ...cached, stale: true };
-    err.feedError = true;
-    throw err;
+  const age = cached ? Date.now() - cached.ts : Infinity;
+  if (age < (ctx.force ? REFRESH_MIN_AGE : FEED_TTL)) return cached;
+
+  let fresh = null;
+  if (!ctx.tripped) {
+    try {
+      fresh = await fromFeed(channelId);
+      ctx.feedFailsInARow = 0;
+    } catch (err) {
+      console.warn('[FavCH] Feed failed', channelId, err.status || err.message);
+      noteFailure(ctx, err);
+      if (++ctx.feedFailsInARow >= TRIP_AFTER) ctx.tripped = true;
+    }
   }
+  if (!fresh) {
+    try {
+      fresh = await ctx.pageLimit(() => fromVideosPage(channelId));
+    } catch (err) {
+      console.warn('[FavCH] Videos page failed', channelId, err.status || err.message);
+      noteFailure(ctx, err);
+      if (cached) return { ...cached, stale: true };
+      err.feedError = true;
+      throw err;
+    }
+  }
+  feedCache[channelId] = fresh;
+  return fresh;
 }
 
-async function pool(items, limit, worker, onEach) {
+async function pool(items, limit, worker, onEach, ctx) {
   let next = 0;
   const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (next < items.length) {
       const i = next++;
+      // Once YouTube starts complaining, slow down rather than pile on.
+      if (ctx.troubled) await sleep(400 + Math.random() * 400);
       await worker(items[i], i);
       onEach();
     }
@@ -300,6 +441,8 @@ async function pool(items, limit, worker, onEach) {
 
 async function load(force) {
   if (loading) return;
+  if (!(await refreshFolders())) return;
+
   const selected = folderBoxes().filter((b) => b.checked).map((b) => b.value);
   const timeframe = getRadio('timeframe') || '7';
   const order = getRadio('order') || 'bookmark';
@@ -333,7 +476,8 @@ async function load(force) {
     }
 
     const idCache = await getLocal('channelIds', {});
-    const feedCache = await getLocal('feedCache', {});
+    const feedCache = await getLocal('videoCache', {});
+    const ctx = { force, tripped: false, troubled: false, feedFailsInARow: 0, pageLimit: makeLimiter(PAGE_CONCURRENCY) };
     const results = new Array(channels.length);
     const failures = [];
     let done = 0;
@@ -341,22 +485,22 @@ async function load(force) {
 
     await pool(channels, CONCURRENCY, async (ch, i) => {
       try {
-        const id = await resolveId(ch, idCache);
-        results[i] = { ch, id, feed: await getVideos(id, feedCache, force) };
+        const id = await resolveId(ch, idCache, ctx);
+        results[i] = { ch, id, feed: await getVideos(id, feedCache, ctx) };
       } catch (err) {
-        failures.push({ label: ch.label, url: ch.url, reason: err.message || 'Unknown error', feed: !!err.feedError });
+        failures.push({ label: ch.label, url: ch.url, reason: err.message || 'Unknown error' });
       }
-    }, () => status(`Checked ${++done} of ${channels.length} channels…`));
+    }, () => status(`Checked ${++done} of ${channels.length} channels…`), ctx);
 
     for (const [k, v] of Object.entries(feedCache)) if (Date.now() - v.ts > KEEP_STALE) delete feedCache[k];
-    await chrome.storage.local.set({ channelIds: idCache, feedCache });
+    await chrome.storage.local.set({ channelIds: idCache, videoCache: feedCache });
 
     // Apply time frame and muted words.
     const cutoff = Date.now() - Number(timeframe) * DAY;
     const muted = (settings.mutedWords || []).map((w) => w.trim().toLowerCase()).filter(Boolean);
     const videos = [];
     const quiet = [];
-    const backupFiltered = [];
+    const fromPages = [];
     const stale = [];
     const seenIds = new Set();
     let mutedCount = 0;
@@ -366,7 +510,7 @@ async function load(force) {
       if (!r || seenIds.has(r.id)) continue;
       seenIds.add(r.id);
       const name = r.feed.channelName || r.ch.label;
-      if (!r.feed.filtered) backupFiltered.push(name);
+      if (r.feed.source === 'page') fromPages.push(name);
       if (r.feed.stale) stale.push({ name, ts: r.feed.ts });
       const kept = r.feed.videos
         .filter((v) => v.published >= cutoff)
@@ -385,7 +529,7 @@ async function load(force) {
     else if (order === 'random') shuffle(videos);
 
     renderGrid(videos);
-    renderReport({ quiet, failures, skipped, backupFiltered, mutedCount, stale, checked: channels.length });
+    renderReport({ quiet, failures, skipped, mutedCount, stale, fromPages, checked: channels.length });
     const time = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     status(`${videos.length} ${videos.length === 1 ? 'video' : 'videos'} from ${activeChannels} ${activeChannels === 1 ? 'channel' : 'channels'}. Updated ${time}.`);
   } catch (err) {
@@ -432,6 +576,16 @@ function timeAgo(ts) {
   return 'just now';
 }
 
+function link(href, className, text) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  if (className) a.className = className;
+  if (text != null) a.textContent = text;
+  return a;
+}
+
 function renderGrid(videos) {
   const grid = $('#grid');
   grid.textContent = '';
@@ -445,13 +599,9 @@ function renderGrid(videos) {
   for (const v of videos) {
     const card = document.createElement('article');
     card.className = 'card';
-
     const watchUrl = `https://www.youtube.com/watch?v=${v.id}`;
-    const thumb = document.createElement('a');
-    thumb.className = 'thumb';
-    thumb.href = watchUrl;
-    thumb.target = '_blank';
-    thumb.rel = 'noopener';
+
+    const thumb = link(watchUrl, 'thumb');
     thumb.tabIndex = -1;
     thumb.setAttribute('aria-hidden', 'true');
     const img = document.createElement('img');
@@ -463,24 +613,16 @@ function renderGrid(videos) {
 
     const title = document.createElement('h3');
     title.className = 'title';
-    const titleLink = document.createElement('a');
-    titleLink.href = watchUrl;
-    titleLink.target = '_blank';
-    titleLink.rel = 'noopener';
-    titleLink.textContent = v.title;
+    const titleLink = link(watchUrl, null, v.title);
     titleLink.title = v.title;
     title.append(titleLink);
 
-    const channel = document.createElement('a');
-    channel.className = 'channel';
-    channel.href = `https://www.youtube.com/channel/${v.channelId}/videos`;
-    channel.target = '_blank';
-    channel.rel = 'noopener';
-    channel.textContent = v.channelName;
+    const channel = link(`https://www.youtube.com/channel/${v.channelId}/videos`, 'channel', v.channelName);
 
     const when = document.createElement('p');
     when.className = 'when';
-    when.textContent = (v.views != null && !Number.isNaN(v.views) ? `${compact.format(v.views)} views, ` : '') + timeAgo(v.published);
+    const views = v.views != null && !Number.isNaN(v.views) ? `${compact.format(v.views)} views, ` : '';
+    when.textContent = views + (v.approx ? 'about ' : '') + timeAgo(v.published);
 
     card.append(thumb, title, channel, when);
     frag.append(card);
@@ -497,12 +639,7 @@ function detailsBlock(summaryText, items, { problem = false, open = false } = {}
   const ul = document.createElement('ul');
   for (const it of items) {
     const li = document.createElement('li');
-    const a = document.createElement('a');
-    a.href = it.href;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    a.textContent = it.text;
-    li.append(a);
+    li.append(link(it.href, null, it.text));
     if (it.reason) {
       const r = document.createElement('span');
       r.className = 'reason';
@@ -515,24 +652,29 @@ function detailsBlock(summaryText, items, { problem = false, open = false } = {}
   return d;
 }
 
-function renderReport({ quiet, failures, skipped, backupFiltered, mutedCount, stale, checked }) {
+function note(text, className) {
+  const p = document.createElement('p');
+  p.textContent = text;
+  if (className) p.className = className;
+  return p;
+}
+
+function renderReport({ quiet, failures, skipped, mutedCount, stale, fromPages, checked }) {
   const report = $('#report');
   report.textContent = '';
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-  const feedFailures = failures.filter((f) => f.feed).length + stale.length;
-  const outage = feedFailures >= 3 && feedFailures >= checked / 2;
+  const unreachable = failures.length + stale.length;
+  const outage = unreachable >= 3 && unreachable >= checked / 2;
   if (outage) {
-    const p = document.createElement('p');
-    p.className = 'outage';
-    p.textContent = "YouTube's feed server is returning errors right now. This happens from time to time and usually clears up within a few hours. Nothing is wrong with your bookmarks. Try Refresh later.";
-    report.append(p);
+    report.append(note("YouTube isn't answering FavCH right now. This happens during YouTube outages, or after many reloads in a short time, and usually clears up within an hour or two. Nothing is wrong with your bookmarks.", 'outage'));
   }
   if (stale.length) {
     const oldest = Math.min(...stale.map((s) => s.ts));
-    const p = document.createElement('p');
-    p.textContent = `Couldn't reach YouTube for ${plural(stale.length, 'channel')}, so ${stale.length === 1 ? 'its videos are' : 'their videos are'} from the last successful check (${timeAgo(oldest)}).`;
-    report.append(p);
+    report.append(note(`Couldn't reach YouTube for ${plural(stale.length, 'channel')}, so ${stale.length === 1 ? 'its videos are' : 'their videos are'} from the last successful check (${timeAgo(oldest)}).`));
+  }
+  if (fromPages.length) {
+    report.append(note(`${plural(fromPages.length, 'channel')} ${fromPages.length === 1 ? 'was' : 'were'} read from ${fromPages.length === 1 ? 'its' : 'their'} channel page because YouTube's feed didn't answer, so upload times for ${fromPages.length === 1 ? 'it' : 'them'} are approximate.`));
   }
   if (failures.length) {
     report.append(detailsBlock(`Couldn't check ${plural(failures.length, 'channel')}`,
@@ -542,16 +684,7 @@ function renderReport({ quiet, failures, skipped, backupFiltered, mutedCount, st
     report.append(detailsBlock(`${plural(skipped.length, 'bookmark')} in these folders ${skipped.length === 1 ? "isn't a channel link" : "aren't channel links"}`,
       skipped.map((s) => ({ text: s.label, href: s.url })), { problem: true }));
   }
-  if (mutedCount) {
-    const p = document.createElement('p');
-    p.textContent = `Hid ${plural(mutedCount, 'video')} matching your muted words.`;
-    report.append(p);
-  }
-  if (backupFiltered.length) {
-    const p = document.createElement('p');
-    p.textContent = `Shorts were filtered the slower way for ${plural(backupFiltered.length, 'channel')} (${backupFiltered.join(', ')}). A livestream replay from ${backupFiltered.length === 1 ? 'it' : 'these'} could still slip through.`;
-    report.append(p);
-  }
+  if (mutedCount) report.append(note(`Hid ${plural(mutedCount, 'video')} matching your muted words.`));
   if (quiet.length) {
     report.append(detailsBlock(`Nothing new from ${plural(quiet.length, 'channel')} in this time frame`,
       quiet.map((q) => ({ text: q.name, href: `https://www.youtube.com/channel/${q.id}/videos` }))));

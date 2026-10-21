@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "FavCH (Favorite Channels)",
   "short_name": "FavCH",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "description": "A home page built only from the channels in a bookmark folder you choose. No Shorts, no livestreams, no recommendations.",
   "permissions": ["bookmarks", "storage"],
   "host_permissions": ["https://www.youtube.com/*"],

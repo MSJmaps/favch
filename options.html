@@ -40,9 +40,14 @@
     </fieldset>
 
     <fieldset>
-      <legend>Saved channel data</legend>
-      <p class="hint">FavCH remembers each channel's ID so it doesn't look it up every time. Clear this if a channel shows the wrong videos after changing its name.</p>
-      <button id="clearCache" type="button">Clear saved channel data</button>
+      <legend>Saved results</legend>
+      <p class="hint">FavCH keeps each channel's recent videos for 30 minutes, and as a backup for when YouTube isn't answering. You rarely need to clear this: removed bookmarks drop out on their own.</p>
+      <button id="clearResults" type="button">Clear saved videos</button>
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <p class="hint">FavCH also remembers which channel each @handle bookmark points to. Reset this only if a channel shows another channel's videos. The next load will look up every channel again, which is slow and can make YouTube refuse requests for a while on a large folder.</p>
+        <button id="resetLookups" type="button">Reset channel lookups</button>
+      </details>
     </fieldset>
 
     <p id="saved" class="saved" role="status"></p>

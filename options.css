@@ -32,3 +32,5 @@ select {
   padding: 7px 10px;
 }
 .locked { cursor: default; font-weight: 600; }
+.advanced { margin-top: 14px; }
+.advanced summary { cursor: pointer; color: var(--muted); font-size: 13px; }

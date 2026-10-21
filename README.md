@@ -30,5 +30,6 @@ FavCH has no servers, accounts, or tracking. Your bookmarks and settings stay in
 ## Known limits
 
 - Each channel's public feed lists its 15 most recent regular uploads, so a channel posting more than that within your time frame will be cut short.
-- Shorts and livestreams are filtered out using YouTube's own playlist categories. A stream recording that a creator reuploads as a regular video will still appear.
+- Shorts and livestreams are filtered out using YouTube's own categories. A stream recording that a creator reuploads as a regular video will still appear.
+- YouTube's feed server has bad stretches. When a feed doesn't answer, FavCH reads the channel's Videos page instead (upload times are then approximate), or shows the last results it saved. If nothing answers, wait an hour or so; reloading over and over makes YouTube refuse requests for longer.
 - If YouTube changes how its pages or feeds work, lookups can break until FavCH is updated. Check this repository for new versions.
