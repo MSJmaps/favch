@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FavCH settings</title>
+  <link rel="stylesheet" href="shared.css">
+  <link rel="stylesheet" href="options.css">
+  <script src="theme.js"></script>
+</head>
+<body>
+  <main class="settings">
+    <h1>FavCH settings</h1>
+    <p class="intro">Changes save as you make them.</p>
+
+    <fieldset>
+      <legend>Your channels folder</legend>
+      <p class="hint">Choose the bookmark folder that holds your favorite channels. Subfolders inside it become the groups you can pick from on the feed page.</p>
+      <select id="folder"></select>
+      <p class="hint">Bookmark a channel's page (or any of its videos) to add it. Organize them into subfolders however you like.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Appearance</legend>
+      <label class="radio"><input type="radio" name="theme" value="system"> Match my system</label>
+      <label class="radio"><input type="radio" name="theme" value="light"> Light</label>
+      <label class="radio"><input type="radio" name="theme" value="dark"> Dark</label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Muted words</legend>
+      <p class="hint">Videos whose titles contain any of these are hidden. One word or phrase per line; capitalization doesn't matter.</p>
+      <textarea id="muted" rows="6" spellcheck="false"></textarea>
+    </fieldset>
+
+    <fieldset>
+      <legend>Your data</legend>
+      <label class="radio locked"><input type="checkbox" checked disabled> Do not share my data</label>
+      <p class="hint">FavCH has no servers, accounts, or tracking. Your bookmarks and settings stay in this browser. It only contacts YouTube to check your channels for new videos.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Saved channel data</legend>
+      <p class="hint">FavCH remembers each channel's ID so it doesn't look it up every time. Clear this if a channel shows the wrong videos after changing its name.</p>
+      <button id="clearCache" type="button">Clear saved channel data</button>
+    </fieldset>
+
+    <p id="saved" class="saved" role="status"></p>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

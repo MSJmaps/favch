@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FavCH</title>
+  <link rel="stylesheet" href="shared.css">
+  <link rel="stylesheet" href="feed.css">
+  <script src="theme.js"></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="panel">
+      <header class="brand">
+        <h1>FavCH</h1>
+        <a href="options.html" target="_blank" class="quiet-link">Settings</a>
+      </header>
+      <p id="folderName" class="folder-name"></p>
+
+      <section class="group" aria-labelledby="folders-h">
+        <h2 id="folders-h">Folders</h2>
+        <label class="check select-all"><input type="checkbox" id="selectAll"><span class="name">Select all</span></label>
+        <div id="folderList" class="folder-list"></div>
+      </section>
+
+      <fieldset class="group">
+        <legend>Posted within</legend>
+        <label class="radio"><input type="radio" name="timeframe" value="1"> 1 day</label>
+        <label class="radio"><input type="radio" name="timeframe" value="2"> 2 days</label>
+        <label class="radio"><input type="radio" name="timeframe" value="7"> 1 week</label>
+        <label class="radio"><input type="radio" name="timeframe" value="14"> 2 weeks</label>
+      </fieldset>
+
+      <fieldset class="group">
+        <legend>Order</legend>
+        <label class="radio"><input type="radio" name="order" value="bookmark"> Bookmark order</label>
+        <label class="radio"><input type="radio" name="order" value="newest"> Newest first</label>
+        <label class="radio"><input type="radio" name="order" value="random"> Random</label>
+      </fieldset>
+
+      <div class="actions">
+        <button id="loadBtn" class="primary" type="button">Load videos</button>
+        <button id="refreshBtn" type="button" title="Skip the saved results from the last 15 minutes and check every channel again">Refresh</button>
+      </div>
+      <p id="status" class="status" role="status"></p>
+
+      <footer class="privacy">
+        <label class="check locked"><input type="checkbox" checked disabled><span>Do not share my data</span></label>
+        <p>FavCH has no servers, accounts, or tracking. Your bookmarks and settings stay in this browser. It only contacts YouTube to check your channels for new videos.</p>
+      </footer>
+    </aside>
+
+    <main class="feed">
+      <div id="grid" class="grid"></div>
+      <p id="empty" class="empty" hidden></p>
+      <section id="report" class="report" hidden></section>
+    </main>
+  </div>
+  <script src="feed.js"></script>
+</body>
+</html>

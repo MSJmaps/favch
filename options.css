@@ -1,0 +1,34 @@
+.settings { max-width: 620px; margin: 0 auto; padding: 36px 22px 60px; }
+.settings h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -.01em; }
+.intro { color: var(--muted); margin: 0 0 26px; }
+fieldset {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 14px 18px 16px;
+  margin: 0 0 16px;
+}
+legend { font-weight: 600; padding: 0 6px; }
+.radio { display: flex; align-items: center; gap: 9px; padding: 4px 0; cursor: pointer; }
+.hint { color: var(--muted); font-size: 13px; margin: 6px 0 10px; }
+textarea {
+  width: 100%;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+.saved { color: var(--muted); font-size: 13px; min-height: 1.4em; }
+select {
+  width: 100%;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+.locked { cursor: default; font-weight: 600; }

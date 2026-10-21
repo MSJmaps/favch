@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "FavCH (Favorite Channels)",
+  "short_name": "FavCH",
+  "version": "1.0.0",
+  "description": "A home page built only from the channels in a bookmark folder you choose. No Shorts, no livestreams, no recommendations.",
+  "permissions": ["bookmarks", "storage"],
+  "host_permissions": ["https://www.youtube.com/*"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_title": "Open FavCH",
+    "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+  },
+  "options_page": "options.html",
+  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+}
